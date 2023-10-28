@@ -1,0 +1,141 @@
+---
+title: Working example for "Model-agnostic unsupervised detection of bots in a Likert-type questionnaire"
+author: "Michael John Ilagan and Carl F. Falk"
+date: "2023 April 9"
+---
+
+# Introduction
+
+This document is a working example of our proposed approach to bot detection, called L1P1 in the companion article, 
+[Model-agnostic unsupervised detection of bots in a Likert-type questionnaire](https://psyarxiv.com/nu26z/).
+In this document, We do as follows:
+
+1. load a dataset;
+2. apply the algorithm; and
+3. inspect the results.
+
+We assume that the working directory has the required R script files.
+From these script files, we load into our workspace the functions implementing our algorithm.
+No packages required.
+
+```{r}
+# helper functions
+source("helper-general.R")
+source("helper-unsuperv.R")
+```
+
+# Step 1: Load the dataset
+
+We begin by loading the test set raw Likert-type data.
+For this demonstration, we will follow the procedure in the paper, which is to sample humans from a real dataset, simulate bots, then put them together as one sample.
+Of course, if you have your own dataset, you should load that instead.
+
+```{r}
+# load test set
+n0 = 5 # set number of humans
+n1 = 95 # set number of bots
+url = "https://vincentarelbundock.github.io/Rdatasets/csv/psych/bfi.csv"
+pointscale = 6 # number of likert categories in the data
+set.seed(409)
+likert = with(new.env(),{
+	# get humans
+	humandata = read.csv(url)[,2:26]
+	sampledrows = sample(1:nrow(humandata),size=n0,replace=TRUE)
+	zte0 = humandata[sampledrows,]
+	# make bots
+	zte1 = rbot(n1,pointscale=pointscale,numitems=ncol(humandata),prob=NULL)
+	# mix humans and bots
+	rbind(as.matrix(zte0),zte1)
+})
+```
+
+Note that because this is a toy example, we know the true classes, so we can easily evaluate the algorithm's performance.
+In a real setting, such information may be unavailable.
+
+```{r}
+# true class labels
+yte = c(rep("human",n0),rep("bot",n1))
+table(yte)
+```
+
+# Step 2: Execute algorithm
+
+The function `detectbotseasy` does L1P1.
+Arguments are:
+
+* `likert`, the raw Likert-type data matrix (denoted $Z$ in the paper);
+* `numbotseach`, how many synthetic bots to generate per test set respondent (denoted $B$ in the paper);
+* `pointscale`, the number of Likert-type response categories; and
+* `threshold`, the p-value cutoff for sparing or flagging the respondent.
+
+The return value is a list of three elements:
+
+* `pval`, a vector of p-values;
+* `nri_obs`, a matrix of locations for the test set respondents (denoted $X$ in the paper);
+* `nri_synth`, a matrix of NRI locations for the synthetic bots (denoted $X^{\mathbb{tr}}$ in the paper); and
+* `familyid`, a vector which tracks to which respondent each synthetic bot is associated with.
+
+```{r}
+# execute algorithm
+set.seed(42)
+detection = detectbotseasy(likert,numbotseach=200,pointscale=pointscale,
+threshold=0.05)
+str(detection)
+```
+
+# Step 3: Inspect the results
+
+If we know the true classes, we can evaluate some performance metrics, such as accuracy and sensitivity.
+We say "kill" when predicted class is bot and "spare" when predicted class is human.
+
+```{r}
+# performance metrics
+perfmet(y=yte,yhat=detection$yhat)
+```
+
+If we know the true classes, it would also make sense to inspect p-value boxplots by class.
+Bots tend to have uniformly distributed p-values, while humans tend to have lower p-values.
+
+```{r}
+# p value boxplots by class 
+boxplot(detection$pval~yte,xlab="true class",ylab="p value")
+```
+
+We can also plot the feature space, using the function `nriplot`.
+Arguments are:
+
+* `xte`, a matrix of feature locations of the test set respondents;
+* `xtr`, a matrix of feature locations of the training set respondents;
+* `yhat`, a vector of predicted classes (must be "spare" vs. "kill");
+* `yte`, a vector of class labels for the test set respondents (must be "human" vs. "bot");
+* `ytr`, a vector of class labels for the training set respondents (must be "human" vs. "bot");
+* `plottrain`, a boolean whether to plot the training set respondents;
+* `getpc`, a boolean whether to use the principal components of the NRIs; and
+* `trplotlim`, a boolean whether the limits of the plot accomodate all training set locations.
+
+```{r}
+# view feature space
+invisible(nriplot(xte=detection$nri_obs,
+xtr=detection$nri_synth[detection$familyid%in%(1:5),],yhat=detection$yhat,
+yte=yte,ytr=NULL,plottrain=TRUE,getpc=FALSE,trplotlim=TRUE))
+```
+
+# Using your own data
+
+You are now ready to detect bots in your own dataset.
+It takes only a few lines of code, assuming your Likert-type data matrix is saved as `likert`, and the number of Likert-type categories is saved as `pointscale`.
+Remember to set the seed for reproducibility.
+The next code block is not run in this document---you will run it yourself in your own R session.
+
+```{r eval=FALSE}
+set.seed(42) # reproducibility
+detection = detectbotseasy(likert,numbotseach=200,
+pointscale=pointscale) # execute algorithm
+detection$yhat # predictions
+```
+
+This is the end of the session.
+
+```{r}
+devtools::session_info()
+```
